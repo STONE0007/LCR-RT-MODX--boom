@@ -3,7 +3,6 @@ name: Build 大脚板 daede
 on:
   workflow_dispatch:
   schedule:
-    # 每天早上 08:00 (UTC 00:00) 自动巡检一次上游更新
     - cron: '37 0 * * *'
 
 jobs:
