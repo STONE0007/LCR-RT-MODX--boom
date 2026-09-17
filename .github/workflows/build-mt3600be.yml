@@ -3,7 +3,7 @@ name: Build 大脚板 daede
 on:
   workflow_dispatch:
   schedule:
-    - cron: '37 23 * * *'
+    - cron: '37 18 * * *'
 
 jobs:
   check:
