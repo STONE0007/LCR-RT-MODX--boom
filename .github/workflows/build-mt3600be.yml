@@ -1,7 +1,13 @@
 name: Build 大脚板 daede
 
 on:
+  repository_dispatch:
   workflow_dispatch:
+    inputs:
+      ssh:
+        description: '开启 SSH 远程调试 (true/false)'
+        required: false
+        default: 'false'
   schedule:
     - cron: '37 18 * * *'
 
@@ -104,9 +110,11 @@ jobs:
           sed -i 's|\.\./\.\./luci\.mk|\$(TOPDIR)/feeds/luci/luci.mk|g' package/luci-theme-aurora/Makefile 2>/dev/null || true
           sed -i 's|\.\./\.\./luci\.mk|\$(TOPDIR)/feeds/luci/luci.mk|g' package/luci-app-aurora-config/Makefile 2>/dev/null || true
 
-          # 7. 替换 Go 编译器为 1.26+ 分支
+          # 7. 替换 Go 编译器（优先拉取 27.x 分支以适配 dae go >= 1.27.0，并开启 GOTOOLCHAIN=auto 兜底）
           rm -rf feeds/packages/lang/golang
-          git clone --depth 1 https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
+          git clone --depth 1 https://github.com/sbwml/packages_lang_golang -b 27.x feeds/packages/lang/golang || \
+            git clone --depth 1 https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
+          sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' feeds/packages/lang/golang/golang/golang-build.sh 2>/dev/null || true
           ./scripts/feeds install -f -p packages golang
 
       - name: 注入满血 eBPF、内核原生 BTF 与事件追踪调优
@@ -219,6 +227,32 @@ jobs:
           # 5. 打印确认保留的应用与主题
           echo "=== 最终确认：保留的 LuCI 应用与主题 ==="
           grep "=y" .config | grep -E "CONFIG_PACKAGE_luci-(app|theme|compat|lua)"
+
+      # 1. 稳定版 Upterm SSH 远程调试
+      - name: SSH 远程调试 (Upterm)
+        uses: owenthereal/action-upterm@v1.15.0
+        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+        with:
+          upterm-version: 'v0.29.0'
+          limit-access-to-actor: true
+
+      # 2. SSH 调试结束后自动将 menuconfig 变更推回仓库
+      - name: 自动保存提取的新配置到仓库
+        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+        run: |
+          cd openwrt
+          ./scripts/diffconfig.sh > $GITHUB_WORKSPACE/.config
+          cd $GITHUB_WORKSPACE
+          if ! git diff --quiet .config; then
+            echo "检测到配置有更新，正在推送回仓库..."
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add .config
+            git commit -m "Update .config via SSH Menuconfig"
+            git push
+          else
+            echo "配置未发生变化，跳过推送。"
+          fi
 
       - name: 预下载源码依赖
         run: |
